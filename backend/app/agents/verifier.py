@@ -113,10 +113,12 @@ def verify(tool_calls: list[ToolCall]) -> VerificationResult:
                           detail=f"Дайджест {did} сохранён в data/digests.json"))
 
         elif tc.tool == "split_goal_into_tasks":
-            ids = [_g(t, "id") for t in _g(out, "tasks", [])]
-            ok = bool(ids) and all(storage.tasks.get(i) for i in ids)
+            tid = _g(_g(out, "task", {}), "id")
+            cid = _g(_g(out, "checklist", {}), "id")
+            ok = bool(tid) and storage.tasks.get(tid) is not None and (
+                not cid or storage.checklists.get(cid) is not None)
             checks.append(VerificationCheck(name="split_goal_into_tasks", ok=ok,
-                          detail=f"Создано задач: {len(ids)}, все в storage"))
+                          detail=f"Цель → задача {tid} + чеклист {cid}"))
 
         elif tc.tool == "schedule_tasks_to_free_slots":
             ids = [_g(e, "id") for e in _g(out, "events", [])]

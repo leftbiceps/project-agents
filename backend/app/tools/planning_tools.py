@@ -6,10 +6,25 @@ from typing import Optional
 
 from pydantic import BaseModel, Field
 
-from ..models import CalendarEvent, EventType, Priority, Task, TaskStatus, now
+from ..models import (
+    CalendarEvent,
+    Checklist,
+    ChecklistItem,
+    EventType,
+    Priority,
+    Task,
+    TaskStatus,
+    now,
+)
 from ..scoring import rank_tasks
 from ..storage import storage
-from ..utils import events_on_day, find_free_slots, parse_date, working_window
+from ..utils import (
+    events_on_day,
+    find_free_slots,
+    parse_date,
+    parse_dt,
+    working_window,
+)
 from .registry import ToolError, tool
 
 _DONE = {TaskStatus.done, TaskStatus.archived}
@@ -32,10 +47,10 @@ class EstimateIn(BaseModel):
 
 
 class SplitGoalIn(BaseModel):
-    goal: str = Field(..., description="Цель пользователя одной фразой")
-    subtasks: list[str] = Field(
+    goal: str = Field(..., description="ОДНА цель одной фразой (станет заголовком задачи)")
+    steps: list[str] = Field(
         default_factory=list,
-        description="Готовые подзадачи (если есть). Иначе будет шаблон.",
+        description="Шаги-пункты чеклиста для этой цели. Если пусто — типовой шаблон.",
     )
     project: Optional[str] = None
     priority: Priority = Priority.medium
@@ -69,32 +84,30 @@ def estimate_task_duration(inp: EstimateIn) -> dict:
 
 
 @tool("split_goal_into_tasks",
-      "Разбить цель на задачи и создать их. Если subtasks не заданы — "
-      "используется типовой шаблон этапов.", SplitGoalIn,
-      output_hint="{tasks: Task[]}")
+      "Разбить ОДНУ цель на ОДНУ задачу + чеклист шагов (план). Шаги становятся "
+      "пунктами чеклиста, а не отдельными задачами. Для нескольких РАЗНЫХ дел "
+      "вызывай этот инструмент по разу на каждое (или create_task на каждое).",
+      SplitGoalIn, output_hint="{task: Task, checklist: Checklist}")
 def split_goal_into_tasks(inp: SplitGoalIn) -> dict:
-    titles = inp.subtasks or [
-        f"Собрать материалы: {inp.goal}",
-        f"Сделать структуру: {inp.goal}",
-        f"Черновик: {inp.goal}",
-        f"Ревью и правки: {inp.goal}",
-        f"Финализировать: {inp.goal}",
+    steps = inp.steps or [
+        "Собрать материалы",
+        "Сделать структуру",
+        "Подготовить черновик",
+        "Ревью и правки",
+        "Финализировать",
     ]
     project = inp.project or inp.goal[:40]
-    deadline = None
-    if inp.deadline:
-        from ..utils import parse_dt
-        deadline = parse_dt(inp.deadline)
-    created: list[Task] = []
-    for t in titles:
-        est = estimate_task_duration(EstimateIn(title=t))["minutes"]
-        task = Task(title=t, status=TaskStatus.todo, priority=inp.priority,
-                    project=project, estimated_minutes=est,
-                    deadline=deadline, source="planning")
-        storage.tasks.add(task)
-        created.append(task)
-    return {"project": project,
-            "tasks": [t.model_dump(mode="json") for t in created]}
+    est = estimate_task_duration(EstimateIn(title=inp.goal))["minutes"]
+    task = Task(title=inp.goal, status=TaskStatus.todo, priority=inp.priority,
+                project=project, estimated_minutes=est,
+                deadline=parse_dt(inp.deadline), source="planning")
+    storage.tasks.add(task)
+    checklist = Checklist(task_id=task.id, title="План",
+                          items=[ChecklistItem(text=s) for s in steps])
+    storage.checklists.add(checklist)
+    storage.tasks.update(task.id, {"checklist_ids": [checklist.id]})
+    return {"task": task.model_dump(mode="json"),
+            "checklist": checklist.model_dump(mode="json")}
 
 
 @tool("schedule_tasks_to_free_slots",

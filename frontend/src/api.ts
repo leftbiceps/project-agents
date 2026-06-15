@@ -29,6 +29,8 @@ export const api = {
   // chat & actions
   chat: (message: string, history: { role: string; content: string }[]) =>
     req<AgentMessage>("/chat", "POST", { message, history }),
+  chatHistory: () => req<AgentMessage[]>("/chat/history"),
+  clearChatHistory: () => req<any>("/chat/history", "DELETE"),
   plan: (text: string, horizon_days = 7) =>
     req<AgentMessage>("/plan", "POST", { text, horizon_days }),
   prioritize: (message?: string) =>
@@ -65,51 +67,3 @@ export const api = {
   evening: () => req<Digest>("/digest/evening", "POST", {}),
   digests: () => req<Digest[]>("/digest"),
 };
-
-// --- Потоковый чат (SSE) ---
-export interface StreamHandlers {
-  onRouted?: (d: { agent: string; rationale: string }) => void;
-  onToolStart?: (d: { tool: string }) => void;
-  onTool?: (d: { tool: string; ok: boolean }) => void;
-  onToken?: (text: string) => void;
-  onDone?: (msg: AgentMessage) => void;
-}
-
-export async function chatStream(
-  message: string,
-  history: { role: string; content: string }[],
-  h: StreamHandlers
-): Promise<void> {
-  const res = await fetch(BASE + "/chat/stream", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ message, history }),
-  });
-  if (!res.ok || !res.body) throw new Error("stream " + res.status);
-
-  const reader = res.body.getReader();
-  const dec = new TextDecoder();
-  let buf = "";
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buf += dec.decode(value, { stream: true });
-    let idx: number;
-    while ((idx = buf.indexOf("\n\n")) >= 0) {
-      const block = buf.slice(0, idx);
-      buf = buf.slice(idx + 2);
-      const line = block.split("\n").find((l) => l.startsWith("data:"));
-      if (!line) continue;
-      let obj: any;
-      try { obj = JSON.parse(line.slice(5).trim()); } catch { continue; }
-      switch (obj.event) {
-        case "routed": h.onRouted?.(obj); break;
-        case "tool_start": h.onToolStart?.(obj); break;
-        case "tool": h.onTool?.(obj); break;
-        case "token": h.onToken?.(obj.text); break;
-        case "done": h.onDone?.(obj.message as AgentMessage); break;
-        case "error": throw new Error(obj.detail || "stream error");
-      }
-    }
-  }
-}

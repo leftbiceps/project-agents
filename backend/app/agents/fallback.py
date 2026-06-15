@@ -165,11 +165,21 @@ def _handle_task(message: str):
                    {"task_id": task_id, "title": "Чеклист", "items": items})
         calls.append(tc2)
         return f"Создал задачу «{title}» и чеклист из {len(items)} пунктов.", calls
-    if any(k in t for k in ("созда", "добавь", "заведи", "нужно", "надо",
-                            "сделать задачу", "новая задача")):
-        tc = _run("task", "create_task", {"title": title, "status": "todo"})
-        calls.append(tc)
-        return f"Создал задачу «{title}».", calls
+    _list_intent = any(k in t for k in ("покажи", "список", "какие задач",
+                                        "мои задач", "что по задач"))
+    _create_intent = any(k in t for k in (
+        "созда", "добавь", "заведи", "нужно", "надо", "сделать задачу",
+        "новая задача", "купить", "сходить", "позвонить", "записаться",
+        "забрать", "оплат", "отправ", "написать", "напомни"))
+    if _create_intent and not _list_intent:
+        goals = _split_goals(message)  # несколько дел через «и»/запятые → несколько задач
+        for g in goals:
+            tc = _run("task", "create_task",
+                      {"title": g[:1].upper() + g[1:], "status": "todo"})
+            calls.append(tc)
+        if len(goals) == 1:
+            return f"Создал задачу «{goals[0]}».", calls
+        return f"Создал задачи ({len(goals)}): " + ", ".join(goals) + ".", calls
     tc = _run("task", "list_tasks", {})
     calls.append(tc)
     tasks = tc.output or []
@@ -208,19 +218,43 @@ def _handle_calendar(message: str):
     return _fmt_day(tc.output), calls
 
 
+def _split_goals(message: str) -> list[str]:
+    """Разбить запрос на отдельные цели (по «и», запятым, двоеточию)."""
+    text = _clean_title(message)
+    if ":" in text:                      # «спланируй неделю: X, Y, Z» → берём после ':'
+        text = text.split(":", 1)[1]
+    parts = re.split(r"\s*(?:,|;| и | а также )\s*", text)
+    parts = [p.strip(" .") for p in parts if len(p.strip(" .")) > 2]
+    return parts or [text]
+
+
 def _handle_planning(message: str):
     calls = []
-    goal = _clean_title(message)
-    tc1 = _run("planning", "split_goal_into_tasks", {"goal": goal})
-    calls.append(tc1)
-    tasks = tc1.output.get("tasks", []) if isinstance(tc1.output, dict) else []
-    task_ids = [x["id"] for x in tasks]
+    goals = _split_goals(message)
+    task_ids: list[str] = []
+    if len(goals) == 1:
+        # одна цель → одна задача + чеклист-план
+        tc = _run("planning", "split_goal_into_tasks", {"goal": goals[0]})
+        calls.append(tc)
+        t = tc.output.get("task") if isinstance(tc.output, dict) else None
+        if t:
+            task_ids.append(t["id"])
+    else:
+        # несколько разных дел → отдельная задача на каждое
+        for g in goals:
+            tc = _run("planning", "create_task", {"title": g, "status": "todo"})
+            calls.append(tc)
+            if isinstance(tc.output, dict) and tc.output.get("id"):
+                task_ids.append(tc.output["id"])
     tc2 = _run("planning", "schedule_tasks_to_free_slots",
                {"task_ids": task_ids, "horizon_days": 7})
     calls.append(tc2)
     events = tc2.output.get("events", []) if isinstance(tc2.output, dict) else []
     warnings = tc2.output.get("warnings", []) if isinstance(tc2.output, dict) else []
-    lines = [f"План по цели «{goal}» ({len(tasks)} задач):"]
+    head = (f"План по цели «{goals[0]}» (задача + чеклист)"
+            if len(goals) == 1
+            else f"Создал задачи ({len(task_ids)}): " + ", ".join(goals))
+    lines = [head + ":"]
     for e in events:
         lines.append(f"- {e['start_datetime'][:16].replace('T', ' ')} — {e['title']}")
     if warnings:

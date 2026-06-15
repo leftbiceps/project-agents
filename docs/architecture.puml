@@ -1,0 +1,48 @@
+@startuml relocation_assistant_architecture
+title Локальный мультиагентный личный ассистент — архитектура
+
+skinparam componentStyle rectangle
+skinparam shadowing false
+left to right direction
+
+actor "Пользователь" as User
+
+package "Frontend (React + nginx)" {
+  [Chat / Tasks / Calendar / Memory / Digest] as UI
+}
+
+package "Backend (FastAPI)" {
+  [REST API\n/chat, /tasks, /calendar, /memory,\n/digest, /plan, /prioritize, /sleep-mode] as API
+  [Supervisor / Orchestrator] as SUP
+  [Профильные агенты\n(task, calendar, planning,\nprioritization, memory,\ndigest, sleep_fairy)] as AGENTS
+  [Reflection\n(детерминированный)] as REF
+  [Verifier\n(детерминированный)] as VER
+  [Tool Registry\n(39 typed-инструментов)] as TOOLS
+  [LLM Adapter\n(provider.py)] as LLMAD
+}
+
+database "JSON storage\n./data (tasks, events,\nmemory, checklists, digests)" as DB
+file "logs/agent.log" as LOG
+node "LLM сервис\n(llama.cpp / Qwen)" as LLM
+artifact "models/*.gguf" as MODELS
+
+User --> UI
+UI --> API : REST /api
+API --> SUP
+SUP --> AGENTS : маршрутизация
+AGENTS --> TOOLS : tool calls
+TOOLS --> DB : чтение/запись
+AGENTS --> LLMAD : reasoning / текст
+LLMAD --> LLM : OpenAI-совместимый API
+LLM --> MODELS : загрузка модели
+SUP --> REF : проверка полноты
+SUP --> VER : проверка изменений
+VER --> DB : сверка с storage
+API --> LOG : события
+
+note bottom of AGENTS
+  LLM — только для недетерминированных шагов.
+  Reflection, Verifier, scoring, поиск слотов
+  и storage — детерминированный код.
+end note
+@enduml

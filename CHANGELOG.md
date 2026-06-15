@@ -5,6 +5,68 @@
 
 ---
 
+## 2026-06-15 — v0.5.0 · Серверная история чата; стриминг удалён
+
+**Что изменено**
+
+- История чата теперь хранится на сервере (`data/chat.json`): ответ
+  сохраняется и переживает перезагрузку страницы — исправляет баг «обновляю,
+  а ответа нет» (раньше пустой плейсхолдер замерзал в localStorage).
+  Добавлены `GET /chat/history` и `DELETE /chat/history`; localStorage убран.
+- Стриминг (`/chat/stream`, SSE) удалён полностью (фронт + бэкенд) как
+  нестабильный с локальным llama.cpp; остался надёжный `/chat`.
+- Промпт Task-агента усилен: казуальные фразы («купить…», «сходить…»,
+  «позвонить…») → `create_task`, а не просто текст (и в rule-based пути тоже).
+
+**Затронутые файлы**
+
+- backend: `app/storage.py` (коллекция chat), `app/agents/orchestrator.py`
+  (persist чата, убран `handle_stream`), `app/routers/chat.py`
+  (`/chat/history`, убран `/chat/stream`), `app/llm/client.py`
+  (убран `stream_agent_loop`), `app/llm/prompts.py`, `app/agents/fallback.py`
+- frontend: `src/pages/Chat.tsx` (история с сервера, без тумблера стрима),
+  `src/api.ts` (`chatHistory`/`clearChatHistory`, убран `chatStream`)
+
+**Как проверить**
+
+Создай задачу в чате → обнови страницу (`Cmd+R`) → ответ и задача на месте.
+
+---
+
+## 2026-06-15 — v0.4.0 · Критерии защиты, quality gate, тесты + UX-фиксы
+
+**Что изменено**
+
+- `docs/PROJECT_OVERVIEW.md` — обзор по критериям защиты (агентность, ролевая
+  модель, архитектура, промпты, данные, метрики, готовность, ограничения).
+- `docs/CRITERIA_GAP_ANALYSIS.md` — честная таблица критерий → статус → gap.
+- `docs/architecture.puml` — диаграмма архитектуры (PlantUML).
+- Quality gate в `evals/eval.py`: пороги hard/soft, `--enforce-gate` (exit code),
+  `--json`; обновлён `METRICS.md` (snapshot: gate PASSED).
+- Детерминированные тесты `backend/tests/` (pytest, 26 шт.): tools, scoring,
+  verifier, reflection, storage round-trip, router.
+- UX/перф-фиксы: keyword-роутинг по умолчанию (`LLM_ROUTING` опц.), надёжный
+  стрим (агент отрабатывает обычным путём, текст — порциями), чат не теряется
+  при переключении вкладок, стрим — опциональный тумблер.
+
+**Затронутые файлы**
+
+- docs: `PROJECT_OVERVIEW.md`, `CRITERIA_GAP_ANALYSIS.md`, `architecture.puml`,
+  `METRICS.md`
+- backend: `evals/eval.py`, `tests/*`, `app/config.py` (`llm_routing`),
+  `app/agents/orchestrator.py`, `app/routers/chat.py`
+- frontend: `src/App.tsx` (чат смонтирован), `src/pages/Chat.tsx` (тумблер стрима)
+
+**Как проверить**
+
+```bash
+cd backend
+python evals/eval.py --enforce-gate     # QUALITY GATE: PASSED ✅
+python -m pytest tests/ -q              # 26 passed
+```
+
+---
+
 ## 2026-06-15 — v0.3.0 · Стриминг ответа, персистентная история чата, UX
 
 **Что изменено**

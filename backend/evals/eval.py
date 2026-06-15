@@ -1,13 +1,15 @@
-"""Простой eval-скрипт: прогоняет сценарии и считает метрики качества.
+"""Eval-скрипт: прогоняет сценарии, считает метрики и проверяет quality gate.
 
 Запуск (из папки backend):
-    python evals/eval.py
+    python evals/eval.py                 # печать метрик
+    python evals/eval.py --enforce-gate  # + exit code 1, если gate не пройден
+    python evals/eval.py --json out.json # сохранить метрики в файл
 
 Работает в любом режиме LLM (none / openai / local_openai / anthropic).
-В rule-based режиме (без ключа/сервера) проверяет детерминированный путь.
 """
 from __future__ import annotations
 
+import argparse
 import json
 import sys
 from pathlib import Path
@@ -46,6 +48,20 @@ SCENARIOS = [
      "calendar", "create_event", lambda st, m: st.events.count() > 0),
 ]
 
+# Пороги quality gate: метрика -> (направление, порог, тип)
+# направление: "ge" — чем больше тем лучше; "le" — чем меньше тем лучше.
+THRESHOLDS = {
+    "Task Success Rate":            ("ge", 0.90, "hard"),
+    "Tool Call Accuracy":           ("ge", 0.90, "hard"),
+    "Verification Pass Rate":       ("ge", 0.95, "hard"),
+    "Human Confirmation Precision": ("ge", 0.90, "hard"),
+    "Routing Accuracy":             ("ge", 0.85, "soft"),
+    "Autonomy Rate":                ("ge", 0.80, "soft"),
+    "Digest Usefulness":            ("ge", 0.70, "soft"),
+    "Calendar Conflict Rate":       ("le", 0.34, "hard"),
+}
+SOFT_PASS_RATE_MIN = 0.75
+
 
 def digest_usefulness(content: str) -> float:
     markers = ["Задачи", "События", "рекоменд", "план"]
@@ -53,10 +69,9 @@ def digest_usefulness(content: str) -> float:
     return round(hits / len(markers), 2)
 
 
-def main() -> int:
+def compute_metrics() -> tuple[dict, list]:
     orch = get_orchestrator()
     seed_demo()
-
     rows = []
     routing_ok = tool_ok = success = autonomy = 0
     verif_total = verif_pass = 0
@@ -89,9 +104,8 @@ def main() -> int:
             if tc.tool == "create_event" and isinstance(tc.output, dict):
                 conflicts_total += len(tc.output.get("conflicts", []))
 
-        rows.append((name, exp_agent, res.agent, "✓" if r_ok else "✗",
-                     "✓" if t_ok else "✗", "✓" if s_ok else "✗",
-                     "✓" if (res.verification and res.verification.passed) else "—"))
+        rows.append((name, exp_agent, res.agent, r_ok, t_ok, s_ok,
+                     bool(res.verification and res.verification.passed)))
 
     # Human Confirmation Precision: прямая проверка Reflection
     del_tc = ToolCall(agent="task", tool="delete_task", input={"id": "x"},
@@ -115,16 +129,63 @@ def main() -> int:
         "Digest Usefulness": round(sum(digest_scores) / len(digest_scores), 2) if digest_scores else 0.0,
         "Calendar Conflict Rate": round(conflicts_total / n, 2),
     }
+    return metrics, rows
+
+
+def check_gate(metrics: dict) -> tuple[bool, list[str]]:
+    """Вернуть (passed, отчёт по метрикам)."""
+    report = []
+    hard_ok = True
+    soft_total = soft_pass = 0
+    for name, value in metrics.items():
+        direction, thr, kind = THRESHOLDS.get(name, ("ge", 0.0, "soft"))
+        ok = value >= thr if direction == "ge" else value <= thr
+        sign = "≥" if direction == "ge" else "≤"
+        report.append(f"  [{kind:4}] {name:<30} {value:<6} ({sign}{thr}) "
+                      f"{'✓' if ok else '✗'}")
+        if kind == "hard" and not ok:
+            hard_ok = False
+        if kind == "soft":
+            soft_total += 1
+            soft_pass += int(ok)
+    soft_rate = (soft_pass / soft_total) if soft_total else 1.0
+    gate = hard_ok and soft_rate >= SOFT_PASS_RATE_MIN
+    report.append(f"\n  hard all pass: {hard_ok} | "
+                  f"soft pass rate: {round(soft_rate, 2)} (мин {SOFT_PASS_RATE_MIN})")
+    return gate, report
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--enforce-gate", action="store_true",
+                    help="вернуть exit code 1, если quality gate не пройден")
+    ap.add_argument("--json", metavar="PATH", help="сохранить метрики в JSON")
+    args = ap.parse_args()
+
+    orch = get_orchestrator()
+    metrics, rows = compute_metrics()
 
     print(f"\nРежим LLM: {orch.mode}\n")
     print(f"{'Сценарий':<24}{'ожид.агент':<16}{'факт':<16}{'rt':<4}{'tool':<6}{'task':<6}{'ver':<4}")
     print("-" * 86)
     for r in rows:
-        print(f"{r[0]:<24}{r[1]:<16}{r[2]:<16}{r[3]:<4}{r[4]:<6}{r[5]:<6}{r[6]:<4}")
-    print("\n=== Метрики ===")
-    for k, v in metrics.items():
-        print(f"  {k:<32} {v}")
-    print("\nJSON:", json.dumps(metrics, ensure_ascii=False))
+        print(f"{r[0]:<24}{r[1]:<16}{r[2]:<16}"
+              f"{'✓' if r[3] else '✗':<4}{'✓' if r[4] else '✗':<6}"
+              f"{'✓' if r[5] else '✗':<6}{'✓' if r[6] else '—':<4}")
+
+    print("\n=== Метрики и quality gate ===")
+    gate, report = check_gate(metrics)
+    print("\n".join(report))
+    print(f"\nQUALITY GATE: {'PASSED ✅' if gate else 'FAILED ❌'}")
+
+    if args.json:
+        Path(args.json).write_text(
+            json.dumps({"mode": orch.mode, "metrics": metrics, "gate": gate},
+                       ensure_ascii=False, indent=2), encoding="utf-8")
+        print(f"\nМетрики сохранены в {args.json}")
+
+    if args.enforce_gate and not gate:
+        return 1
     return 0
 
 

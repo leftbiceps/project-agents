@@ -48,7 +48,11 @@ export default function App() {
                   onClick={() => setTab(k)}>{label}</button>
         ))}
       </div>
-      {tab === "chat" && <Chat />}
+      {/* Чат держим смонтированным (скрываем CSS), чтобы долгий запрос не
+          терялся при переключении вкладок и ответ дописался в историю. */}
+      <div style={{ display: tab === "chat" ? "block" : "none" }}>
+        <Chat />
+      </div>
       {tab === "tasks" && <Tasks />}
       {tab === "calendar" && <CalendarPage />}
       {tab === "memory" && <Memory />}

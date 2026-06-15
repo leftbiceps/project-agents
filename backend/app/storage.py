@@ -21,6 +21,7 @@ from pydantic import BaseModel
 from .config import get_settings
 from .logging_conf import log_event
 from .models import (
+    AgentMessage,
     CalendarEvent,
     Checklist,
     Digest,
@@ -149,11 +150,13 @@ class Storage:
         self.checklists: Repo[Checklist] = Repo(d / "checklists.json", Checklist, "checklists")
         self.digests: Repo[Digest] = Repo(d / "digests.json", Digest, "digests")
         self.notes: Repo[Note] = Repo(d / "notes.json", Note, "notes")
+        # Переписка чата (persistent, чтобы переживала перезагрузку страницы).
+        self.chat: Repo[AgentMessage] = Repo(d / "chat.json", AgentMessage, "chat")
 
     def reset(self) -> None:
         """Очистить все коллекции (используется в тестах/демо-сидинге)."""
         for repo in (self.tasks, self.events, self.memory,
-                     self.checklists, self.digests, self.notes):
+                     self.checklists, self.digests, self.notes, self.chat):
             repo._write_raw([])
 
 

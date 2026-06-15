@@ -44,6 +44,9 @@ class Settings(BaseSettings):
     llm_max_tokens: int = 1500
     llm_temperature: float = 0.2
     max_agent_steps: int = 8
+    # Маршрутизация Supervisor через LLM (медленнее на CPU). По умолчанию —
+    # быстрый keyword-роутер. Включить: LLM_ROUTING=true.
+    llm_routing: bool = False
 
     # --- Пути к данным и логам ---
     data_dir: Path = PROJECT_ROOT / "data"

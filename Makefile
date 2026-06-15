@@ -6,7 +6,7 @@ GPU_FILES := -f docker-compose.yml -f docker-compose.gpu.yml
 HF_REPO ?= unsloth/Qwen3.5-9B-GGUF
 HF_INCLUDE ?= *Q6_K*.gguf
 
-.PHONY: help start start-gpu pull-model build up up-gpu down restart logs logs-backend logs-llm ps health clean check-model
+.PHONY: help start start-gpu pull-model build up up-gpu down restart logs logs-backend logs-llm ps health clean check-model eval test
 
 help:
 	@echo "Команды:"
@@ -24,6 +24,8 @@ help:
 	@echo "  make logs-llm      — логи LLM"
 	@echo "  make ps            — статус контейнеров"
 	@echo "  make health        — проверить /health и /health/llm"
+	@echo "  make eval          — метрики + quality gate (в контейнере)"
+	@echo "  make test          — pytest (в контейнере)"
 	@echo "  make clean         — остановить и удалить volume'ы"
 
 start:
@@ -73,3 +75,9 @@ clean:
 
 check-model:
 	@bash scripts/check_local_model.sh
+
+eval:
+	$(COMPOSE) exec backend python evals/eval.py --enforce-gate
+
+test:
+	$(COMPOSE) exec backend sh -c "pip install -q pytest && python -m pytest tests/ -q"

@@ -1,21 +1,15 @@
 import React, { useEffect, useRef, useState } from "react";
-import { api, chatStream } from "../api";
+import { api } from "../api";
 import type { AgentMessage } from "../types";
 
 interface Entry {
   role: "user" | "assistant";
   content: string;
   msg?: AgentMessage;
-  streaming?: boolean;
-  status?: string;
+  pending?: boolean;
 }
 
-const STORAGE_KEY = "assistant_chat_history_v1";
-
-function loadHistory(): Entry[] {
-  try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]"); }
-  catch { return []; }
-}
+// История чата хранится на сервере (data/chat.json) и переживает перезагрузку.
 
 const short = (o: any) => {
   const s = JSON.stringify(o);
@@ -65,20 +59,25 @@ function MsgMeta({ msg }: { msg: AgentMessage }) {
 }
 
 export default function Chat() {
-  const [entries, setEntries] = useState<Entry[]>(loadHistory);
+  const [entries, setEntries] = useState<Entry[]>([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const logRef = useRef<HTMLDivElement>(null);
 
-  // Персистентная история чата: сохраняем переписку в localStorage,
-  // чтобы она не пропадала при перезагрузке страницы / перезапуске.
+  // История чата хранится на сервере — грузим при монтировании, поэтому она
+  // на месте после любой перезагрузки страницы.
   useEffect(() => {
-    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(entries)); } catch { /* quota */ }
-  }, [entries]);
+    api.chatHistory()
+      .then((recs) => setEntries(recs.map((r) =>
+        r.role === "user"
+          ? { role: "user", content: r.content }
+          : { role: "assistant", content: r.content, msg: r })))
+      .catch(() => { /* история пуста/недоступна */ });
+  }, []);
 
-  const clearHistory = () => {
+  const clearHistory = async () => {
     setEntries([]);
-    try { localStorage.removeItem(STORAGE_KEY); } catch { /* ignore */ }
+    try { await api.clearChatHistory(); } catch { /* ignore */ }
   };
 
   const scroll = () =>
@@ -91,7 +90,7 @@ export default function Chat() {
     setEntries((p) => [
       ...p,
       { role: "user", content: text },
-      { role: "assistant", content: "", streaming: true, status: "…" },
+      { role: "assistant", content: "", pending: true },
     ]);
     setInput(""); setBusy(true); scroll();
 
@@ -105,28 +104,11 @@ export default function Chat() {
         return c;
       });
 
-    let gotAny = false;
     try {
-      await chatStream(text, history, {
-        onRouted: (d) => upd((e) => ({ ...e, status: `маршрут → ${d.agent}` })),
-        onToolStart: (d) => { gotAny = true; upd((e) => ({ ...e, status: `⚙ ${d.tool}…` })); },
-        onTool: () => { gotAny = true; },
-        onToken: (t) => { gotAny = true; upd((e) => ({ ...e, status: undefined, content: e.content + t })); scroll(); },
-        onDone: (m) => { gotAny = true; upd((e) => ({ ...e, streaming: false, status: undefined, content: m.content || e.content, msg: m })); },
-      });
-      upd((e) => (e.streaming ? { ...e, streaming: false, status: undefined } : e));
+      const m = await api.chat(text, history);
+      upd((e) => ({ ...e, pending: false, content: m.content, msg: m }));
     } catch (err: any) {
-      if (!gotAny) {
-        // стрим недоступен (старый backend / сеть) — обычный запрос
-        try {
-          const m = await api.chat(text, history);
-          upd((e) => ({ ...e, streaming: false, status: undefined, content: m.content, msg: m }));
-        } catch (e2: any) {
-          upd((e) => ({ ...e, streaming: false, status: undefined, content: "Ошибка: " + e2.message }));
-        }
-      } else {
-        upd((e) => ({ ...e, streaming: false, status: undefined, content: e.content || ("Ошибка: " + err.message) }));
-      }
+      upd((e) => ({ ...e, pending: false, content: "Ошибка: " + err.message }));
     } finally { setBusy(false); scroll(); }
   };
 
@@ -148,12 +130,7 @@ export default function Chat() {
         {entries.map((e, i) => (
           <div key={i} className={"msg " + e.role}>
             {e.content && <div>{e.content}</div>}
-            {e.streaming && e.status && (
-              <div className="muted" style={{ fontSize: 12 }}>{e.status}</div>
-            )}
-            {e.streaming && !e.content && !e.status && (
-              <div className="muted">…</div>
-            )}
+            {e.pending && !e.content && <div className="muted">…</div>}
             {e.msg && <MsgMeta msg={e.msg} />}
           </div>
         ))}

@@ -8,11 +8,32 @@
 
 ```bash
 cd backend
-python evals/eval.py
+python evals/eval.py                 # печать метрик и quality gate
+python evals/eval.py --enforce-gate  # + exit code 1, если gate не пройден (для CI)
+python evals/eval.py --json out.json # сохранить метрики в файл
 ```
 
-Скрипт печатает таблицу по сценариям и сводные метрики (плюс JSON). Работает в
-любом режиме LLM; в rule-based режиме проверяется детерминированный путь.
+Скрипт печатает таблицу по сценариям, метрики и результат quality gate. Работает
+в любом режиме LLM; в rule-based режиме проверяется детерминированный путь.
+
+## Quality gate
+
+Пороги заданы в `evals/eval.py` (`THRESHOLDS`): часть метрик — **hard**
+(обязаны пройти), часть — **soft** (допускается частичный провал).
+
+| Метрика | Порог | Тип |
+|---|---|---|
+| Task Success Rate | ≥ 0.90 | hard |
+| Tool Call Accuracy | ≥ 0.90 | hard |
+| Verification Pass Rate | ≥ 0.95 | hard |
+| Human Confirmation Precision | ≥ 0.90 | hard |
+| Calendar Conflict Rate | ≤ 0.34 | hard |
+| Routing Accuracy | ≥ 0.85 | soft |
+| Autonomy Rate | ≥ 0.80 | soft |
+| Digest Usefulness | ≥ 0.70 | soft |
+
+Gate проходит, если **все hard-метрики** прошли и **soft pass rate ≥ 75%**.
+Команда `python evals/eval.py --enforce-gate` возвращает ненулевой код при провале.
 
 ## Определения метрик
 
