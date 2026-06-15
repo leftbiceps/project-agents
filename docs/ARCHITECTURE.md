@@ -53,19 +53,24 @@ flowchart TB
      до финального текста или лимита шагов.
    - **Rule-based режим:** детерминированные обработчики (`agents/fallback.py`)
      вызывают инструменты по правилам.
-4. **Reflection** (`agents/reflection.py`) — проверяет полноту: выполнена ли
+4. **Safety-net** (`agents/safety_net.py`, только LLM-режим) — если модель не
+   довела действие до конца (типично для малых моделей), детерминированно
+   доделывает недостающий шаг (чеклист / событие / расписание / память), без
+   дублей. LLM остаётся ведущим, код страхует результат.
+5. **Reflection** (`agents/reflection.py`) — проверяет полноту: выполнена ли
    цель, нет ли ошибок инструментов, конфликтов календаря, задач без дедлайна,
    нужно ли подтверждение, нет ли противоречий с памятью. Возвращает
    `ReflectionResult`.
-5. **Verifier** (`agents/verifier.py`) — проверяет фактические изменения в
+6. **Verifier** (`agents/verifier.py`) — проверяет фактические изменения в
    storage (задача/событие/чеклист/дайджест/память реально созданы/обновлены).
    Возвращает `VerificationResult`.
-6. Ответ собирается в `AgentMessage` (текст + routed_to + rationale + tool_calls
-   + reflection + verification) и возвращается фронтенду, который их отображает.
+7. Ответ собирается в `AgentMessage` (текст + routed_to + rationale + tool_calls
+   + reflection + verification), **сохраняется в `data/chat.json`** и
+   возвращается фронтенду, который отображает текст, tool calls и проверки.
 
 Каждый шаг пишется в `logs/agent.log` структурированными событиями
 (`user_request`, `routed`, `tool_call`, `tool_result`, `storage_change`,
-`reflection`, `verification`, `tool_error`, `http_request`).
+`safety_net`, `reflection`, `verification`, `tool_error`, `http_request`).
 
 ## Почему Reflection и Verifier детерминированы
 
@@ -87,6 +92,7 @@ tool calls и текущим состоянием storage, а не как ещё
 | `data/events.json` | события календаря |
 | `data/memory.json` | личная память |
 | `data/digests.json` | сохранённые дайджесты |
+| `data/chat.json` | история переписки чата (переживает перезагрузку) |
 | `data/notes.json` | заметки базы знаний (опционально) |
 | `data/knowledge_base/*.md` | markdown-заметки с YAML-фронтматтером |
 | `logs/agent.log` | журнал событий |

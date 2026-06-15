@@ -15,7 +15,7 @@ from ..logging_conf import log_event
 from ..models import AgentMessage, ChatTurn, ToolCall
 from ..storage import storage
 from ..tools import registry
-from . import fallback
+from . import fallback, safety_net
 from .definitions import AGENT_TOOLS
 from .reflection import reflect
 from .router import keyword_route
@@ -92,10 +92,21 @@ class Orchestrator:
             agent, rationale = self.route(message)
         log_event("routed", agent=agent, rationale=rationale)
 
-        if self.client:
-            content, tool_calls = self._run_llm_agent(agent, message, history)
-        else:
-            content, tool_calls = fallback.handle(agent, message)
+        try:
+            if self.client:
+                content, tool_calls = self._run_llm_agent(agent, message, history)
+                # safety-net: если модель не довела действие — доделываем детерминированно
+                extra = safety_net.complete(agent, message, tool_calls)
+                if extra:
+                    log_event("safety_net", agent=agent,
+                              added=[tc.tool for tc in extra])
+                    tool_calls = tool_calls + extra
+            else:
+                content, tool_calls = fallback.handle(agent, message)
+        except Exception as exc:  # noqa: BLE001 — не роняем запрос на ошибке LLM
+            log_event("agent_error", agent=agent, error=str(exc))
+            content, tool_calls = (
+                f"LLM временно недоступен ({exc}). Попробуйте ещё раз.", [])
 
         reflection = reflect(message, agent, tool_calls, content)
         verification = verify(tool_calls)

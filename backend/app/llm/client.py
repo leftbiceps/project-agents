@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import json
+import time
 from dataclasses import dataclass, field
 from typing import Callable, Optional
 
@@ -26,6 +27,22 @@ class AgentRunResult:
 
 def _dumps(obj: object) -> str:
     return json.dumps(obj, ensure_ascii=False, default=str)
+
+
+def _with_retry(fn, attempts: int = 4, delay: float = 5.0):
+    """Повтор при временной недоступности LLM (напр. 503 «Loading model»)."""
+    last = None
+    for _ in range(attempts):
+        try:
+            return fn()
+        except Exception as exc:  # noqa: BLE001
+            last = exc
+            if any(k in str(exc).lower() for k in
+                   ("loading model", "503", "unavailable", "temporarily")):
+                time.sleep(delay)
+                continue
+            raise
+    raise last
 
 
 class LLMClient:
@@ -71,7 +88,7 @@ class AnthropicClient(LLMClient):
             )
             if tool_schemas:
                 kwargs["tools"] = tool_schemas
-            resp = self.client.messages.create(**kwargs)
+            resp = _with_retry(lambda: self.client.messages.create(**kwargs))
 
             assistant_content = []
             tool_results = []
@@ -164,7 +181,7 @@ class OpenAIClient(LLMClient):
             )
             if oa_tools:
                 kwargs["tools"] = oa_tools
-            resp = self.client.chat.completions.create(**kwargs)
+            resp = _with_retry(lambda: self.client.chat.completions.create(**kwargs))
             msg = resp.choices[0].message
             last_text = msg.content or last_text
 

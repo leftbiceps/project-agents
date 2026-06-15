@@ -115,6 +115,8 @@ docker-compose.yml  + Dockerfile.* + Makefile + scripts/
 
 ## Документация
 
+- [docs/PROJECT_OVERVIEW.md](docs/PROJECT_OVERVIEW.md) — обзор по критериям защиты (главный документ).
+- [docs/CRITERIA_GAP_ANALYSIS.md](docs/CRITERIA_GAP_ANALYSIS.md) — критерий → статус → остаток.
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — архитектура, поток запроса, storage.
 - [docs/AGENTS.md](docs/AGENTS.md) — роли агентов, доступные инструменты, ограничения.
 - [docs/TOOLS.md](docs/TOOLS.md) — справочник всех инструментов (вход/выход).
@@ -123,6 +125,8 @@ docker-compose.yml  + Dockerfile.* + Makefile + scripts/
 - [docs/DEPLOYMENT_LOCAL.md](docs/DEPLOYMENT_LOCAL.md) — локальный запуск через Docker.
 - [docs/LLM_LOCAL_INFERENCE.md](docs/LLM_LOCAL_INFERENCE.md) — локальный inference (Qwen/llama.cpp).
 - [docs/DOCKER_ARCHITECTURE.md](docs/DOCKER_ARCHITECTURE.md) — контейнеры, порты, volume'ы.
+- [docs/architecture.puml](docs/architecture.puml) — диаграмма архитектуры (PlantUML).
+- [presentation/](presentation/) — презентация защиты (.pptx, 22 слайда).
 - [CHANGELOG.md](CHANGELOG.md) — история изменений.
 
 ## Ограничения

@@ -63,9 +63,12 @@ THRESHOLDS = {
 SOFT_PASS_RATE_MIN = 0.75
 
 
-def digest_usefulness(content: str) -> float:
-    markers = ["Задачи", "События", "рекоменд", "план"]
-    hits = sum(1 for w in markers if w.lower() in content.lower())
+def digest_usefulness(content: str, kind: str = "morning") -> float:
+    # Полнота САМОГО дайджеста (сохранённого), маркеры под тип (утро/вечер).
+    markers = (["задач", "событ", "рекоменд", "план"] if kind == "morning"
+               else ["выполн", "перенес", "план", "завтра"])
+    c = (content or "").lower()
+    hits = sum(1 for w in markers if w in c)
     return round(hits / len(markers), 2)
 
 
@@ -98,8 +101,11 @@ def compute_metrics() -> tuple[dict, list]:
         if res.verification and res.verification.checks:
             verif_total += 1
             verif_pass += res.verification.passed
-        if "digest" in (exp_tool or "") or exp_agent in ("digest", "sleep_fairy"):
-            digest_scores.append(digest_usefulness(res.content))
+        if exp_agent in ("digest", "sleep_fairy"):
+            kind = "evening" if exp_agent == "sleep_fairy" else "morning"
+            digs = [d for d in storage.digests.all() if d.kind == kind]
+            content = digs[-1].content if digs else res.content
+            digest_scores.append(digest_usefulness(content, kind))
         for tc in res.tool_calls:
             if tc.tool == "create_event" and isinstance(tc.output, dict):
                 conflicts_total += len(tc.output.get("conflicts", []))
