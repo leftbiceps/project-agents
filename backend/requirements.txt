@@ -1,0 +1,14 @@
+# --- Ядро backend ---
+fastapi>=0.110
+uvicorn[standard]>=0.29
+pydantic>=2.6
+pydantic-settings>=2.2
+python-dateutil>=2.9
+APScheduler>=3.10
+httpx>=0.27
+
+# --- LLM-провайдеры (нужен только тот, что выбран в .env) ---
+# Без ключа система работает в деградационном (rule-based) режиме,
+# поэтому оба пакета опциональны и импортируются лениво.
+anthropic>=0.39
+openai>=1.30

@@ -1,0 +1,20 @@
+# Frontend (Vite + React) — сборка и раздача через nginx
+FROM node:20-alpine AS build
+WORKDIR /app
+COPY frontend/package.json frontend/package-lock.json* ./
+# Устойчивость к медленной/флакающей сети npm (EIDLETIMEOUT): длинные таймауты,
+# ретраи и меньше параллельных соединений. Один авто-повтор на случай обрыва.
+RUN npm config set fetch-timeout 600000 \
+ && npm config set fetch-retries 5 \
+ && npm config set fetch-retry-mintimeout 20000 \
+ && npm config set fetch-retry-maxtimeout 180000 \
+ && (npm ci --no-audit --no-fund --maxsockets 3 \
+     || (echo "retry npm ci..." && sleep 5 && npm ci --no-audit --no-fund --maxsockets 3))
+COPY frontend/ ./
+RUN npm run build
+
+FROM nginx:1.27-alpine
+# nginx проксирует /api/ на backend:8000 и раздаёт статику SPA
+COPY docker/nginx.conf /etc/nginx/conf.d/default.conf
+COPY --from=build /app/dist /usr/share/nginx/html
+EXPOSE 80

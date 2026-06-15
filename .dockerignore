@@ -1,0 +1,24 @@
+# Python
+**/__pycache__/
+**/*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# Node / frontend
+node_modules/
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+
+# Runtime (монтируется как volume, в образ не нужно)
+data/
+logs/
+models/
+*.log
+
+# VCS / секреты / прочее
+.git/
+.gitignore
+.env
+*.md

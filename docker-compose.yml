@@ -1,0 +1,94 @@
+# ============================================================================
+#  Локальный мультиагентный ассистент — Docker Compose (CPU режим по умолчанию)
+#
+#  Сервисы:
+#    llm       — локальный inference (llama.cpp server, OpenAI-compatible)
+#    backend   — FastAPI API (агенты, инструменты, storage)
+#    frontend  — React/Vite, раздаётся через nginx, проксирует /api -> backend
+#
+#  Запуск:  make up   (или docker compose up -d)
+#  GPU:     make up-gpu (добавляет docker-compose.gpu.yml)
+# ============================================================================
+name: local-assistant
+
+services:
+  llm:
+    image: ${LLM_IMAGE:-ghcr.io/ggml-org/llama.cpp:server}
+    container_name: assistant-llm
+    volumes:
+      - ./models:/models
+    # список аргументов (надёжнее folded-строки при exec-entrypoint llama-server)
+    command:
+      - "-m"
+      - "${LLM_MODEL_PATH:-/models/qwen-3.5-9b-int6.gguf}"
+      - "-c"
+      - "${LLM_CONTEXT_SIZE:-8192}"
+      - "-t"
+      - "${LLM_THREADS:-8}"
+      - "-ngl"
+      - "${LLM_GPU_LAYERS:-0}"
+      - "--host"
+      - "0.0.0.0"
+      - "--port"
+      - "8000"
+      - "--api-key"
+      - "${LLM_API_KEY:-local}"
+    expose:
+      - "8000"
+    ports:
+      # проброс наружу только для ручной отладки (curl localhost:8001/v1/models)
+      - "${LLM_PORT:-8001}:8000"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8000/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 300s
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: assistant-backend
+    env_file: .env
+    environment:
+      # адрес локального LLM внутри compose-сети (имеет приоритет)
+      - LLM_BASE_URL=${LLM_BASE_URL:-http://llm:8000/v1}
+    depends_on:
+      # backend стартует, не дожидаясь загрузки модели; /health/llm покажет статус
+      llm:
+        condition: service_started
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./docs:/app/docs
+    healthcheck:
+      test:
+        - "CMD-SHELL"
+        - "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health').status==200 else 1)\" || exit 1"
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    container_name: assistant-frontend
+    depends_on:
+      backend:
+        condition: service_started
+    ports:
+      - "${FRONTEND_PORT:-3000}:80"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:80/ >/dev/null 2>&1 || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped

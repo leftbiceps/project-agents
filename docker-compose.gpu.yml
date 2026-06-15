@@ -1,0 +1,27 @@
+# ============================================================================
+#  GPU-оверлей для llm-сервиса (NVIDIA CUDA).
+#
+#  Запуск:  make up-gpu
+#  (эквивалент: docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d)
+#
+#  Требования:
+#    - NVIDIA GPU + драйвер
+#    - nvidia-container-toolkit (Docker GPU runtime)
+#    - в .env выставить LLM_GPU_LAYERS (например 999 — выгрузить все слои на GPU)
+#
+#  Базовый docker-compose.yml не меняется, поэтому CPU-режим остаётся рабочим.
+# ============================================================================
+services:
+  llm:
+    # CUDA-образ llama.cpp server (можно переопределить через LLM_IMAGE_GPU)
+    image: ${LLM_IMAGE_GPU:-ghcr.io/ggml-org/llama.cpp:server-cuda}
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]

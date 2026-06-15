@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# Env / secrets
+.env
+backend/.env
+
+# Runtime data and logs (генерируются ассистентом)
+data/*.json
+data/knowledge_base/
+logs/
+!data/.gitkeep
+!logs/.gitkeep
+
+# Локальные модели (большие GGUF-файлы не коммитим)
+models/*
+!models/.gitkeep
+!models/README.md
+
+# Node / frontend
+node_modules/
+frontend/dist/
+frontend/.vite/
+
+# OS
+.DS_Store
+Thumbs.db
