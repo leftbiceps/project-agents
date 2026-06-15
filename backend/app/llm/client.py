@@ -196,6 +196,77 @@ class OpenAIClient(LLMClient):
         return AgentRunResult(
             last_text or "(достигнут лимит шагов агента)", collected, max_steps)
 
+    def stream_agent_loop(self, *, system, user_message, tool_schemas,
+                          execute_tool, history=None, max_steps=8):
+        """Генератор событий стрима:
+        ('token', str) | ('tool_start', name) | ('tool', ToolCall) |
+        ('result', AgentRunResult).
+        """
+        messages: list[dict] = [{"role": "system", "content": system}]
+        messages += list(history or [])
+        messages.append({"role": "user", "content": user_message})
+        oa_tools = self._tools(tool_schemas)
+        collected: list[ToolCall] = []
+        last_text = ""
+
+        for step in range(max_steps):
+            kwargs = dict(model=self.model, temperature=self.s.llm_temperature,
+                          max_tokens=self.s.llm_max_tokens, messages=messages,
+                          stream=True)
+            if oa_tools:
+                kwargs["tools"] = oa_tools
+            stream = self.client.chat.completions.create(**kwargs)
+
+            content_buf = ""
+            tools_acc: dict[int, dict] = {}
+            for chunk in stream:
+                if not chunk.choices:
+                    continue
+                delta = chunk.choices[0].delta
+                if getattr(delta, "content", None):
+                    content_buf += delta.content
+                    yield ("token", delta.content)
+                for tc in (getattr(delta, "tool_calls", None) or []):
+                    acc = tools_acc.setdefault(
+                        tc.index, {"id": "", "name": "", "args": ""})
+                    if tc.id:
+                        acc["id"] = tc.id
+                    if tc.function and tc.function.name:
+                        acc["name"] = tc.function.name
+                    if tc.function and tc.function.arguments:
+                        acc["args"] += tc.function.arguments
+
+            if tools_acc:
+                messages.append({
+                    "role": "assistant",
+                    "content": content_buf or None,
+                    "tool_calls": [{
+                        "id": a["id"] or f"call_{i}", "type": "function",
+                        "function": {"name": a["name"], "arguments": a["args"] or "{}"},
+                    } for i, a in tools_acc.items()],
+                })
+                for i, a in tools_acc.items():
+                    yield ("tool_start", a["name"])
+                    try:
+                        args = json.loads(a["args"] or "{}")
+                    except json.JSONDecodeError:
+                        args = {}
+                    rec = execute_tool(a["name"], args)
+                    collected.append(rec)
+                    yield ("tool", rec)
+                    messages.append({"role": "tool",
+                                     "tool_call_id": a["id"] or f"call_{i}",
+                                     "content": _dumps(rec.output)})
+                last_text = content_buf or last_text
+                continue
+
+            last_text = content_buf or last_text
+            yield ("result", AgentRunResult(last_text, collected, step + 1))
+            return
+
+        yield ("result", AgentRunResult(
+            last_text or "(достигнут лимит шагов агента)", collected, max_steps))
+
     def classify(self, *, system, user, choices) -> str:
         resp = self.client.chat.completions.create(
             model=self.model,

@@ -61,15 +61,26 @@ else
   hf download "$HF_REPO" --include "$HF_INCLUDE" --local-dir ./models
 fi
 
-echo "==> [4/6] Прописываю путь к модели в .env"
-MODEL_FILE="$(find models -type f -name '*.gguf' 2>/dev/null | head -n1 || true)"
-[ -n "$MODEL_FILE" ] || { echo "❌ .gguf не найден в ./models после загрузки."; exit 1; }
-REL="${MODEL_FILE#models/}"
-CONT_PATH="/models/$REL"
-grep -v '^LLM_MODEL_PATH=' .env > .env.tmp || true
-echo "LLM_MODEL_PATH=$CONT_PATH" >> .env.tmp
-mv .env.tmp .env
-echo "✔ LLM_MODEL_PATH=$CONT_PATH  (файл: $MODEL_FILE)"
+echo "==> [4/6] Определяю файл модели"
+# Если в .env уже указан существующий файл — уважаем явный выбор.
+CUR="$(grep -E '^LLM_MODEL_PATH=' .env 2>/dev/null | head -1 | cut -d= -f2-)"
+CUR_BASE="$(basename "${CUR:-}")"
+if [ -n "$CUR_BASE" ] && [ -f "models/$CUR_BASE" ]; then
+  echo "✔ Использую модель из .env: models/$CUR_BASE"
+else
+  COUNT="$(find models -type f -name '*.gguf' 2>/dev/null | wc -l | tr -d ' ')"
+  MODEL_FILE="$(ls -t models/*.gguf 2>/dev/null | head -n1 || true)"
+  [ -n "$MODEL_FILE" ] || { echo "❌ .gguf не найден в ./models."; exit 1; }
+  if [ "$COUNT" -gt 1 ]; then
+    echo "⚠ В ./models несколько .gguf — выбран самый свежий: $MODEL_FILE"
+    echo "  Чтобы зафиксировать другой — пропишите LLM_MODEL_PATH в .env."
+  fi
+  REL="${MODEL_FILE#models/}"
+  grep -v '^LLM_MODEL_PATH=' .env > .env.tmp 2>/dev/null || true
+  echo "LLM_MODEL_PATH=/models/$REL" >> .env.tmp
+  mv .env.tmp .env
+  echo "✔ LLM_MODEL_PATH=/models/$REL"
+fi
 
 # подгрузить переменные .env для вывода ссылок
 set -a; . ./.env; set +a

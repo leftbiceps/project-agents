@@ -1,8 +1,21 @@
-import React, { useRef, useState } from "react";
-import { api } from "../api";
+import React, { useEffect, useRef, useState } from "react";
+import { api, chatStream } from "../api";
 import type { AgentMessage } from "../types";
 
-interface Entry { role: "user" | "assistant"; content: string; msg?: AgentMessage; }
+interface Entry {
+  role: "user" | "assistant";
+  content: string;
+  msg?: AgentMessage;
+  streaming?: boolean;
+  status?: string;
+}
+
+const STORAGE_KEY = "assistant_chat_history_v1";
+
+function loadHistory(): Entry[] {
+  try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]"); }
+  catch { return []; }
+}
 
 const short = (o: any) => {
   const s = JSON.stringify(o);
@@ -52,10 +65,21 @@ function MsgMeta({ msg }: { msg: AgentMessage }) {
 }
 
 export default function Chat() {
-  const [entries, setEntries] = useState<Entry[]>([]);
+  const [entries, setEntries] = useState<Entry[]>(loadHistory);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const logRef = useRef<HTMLDivElement>(null);
+
+  // Персистентная история чата: сохраняем переписку в localStorage,
+  // чтобы она не пропадала при перезагрузке страницы / перезапуске.
+  useEffect(() => {
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(entries)); } catch { /* quota */ }
+  }, [entries]);
+
+  const clearHistory = () => {
+    setEntries([]);
+    try { localStorage.removeItem(STORAGE_KEY); } catch { /* ignore */ }
+  };
 
   const scroll = () =>
     setTimeout(() => logRef.current?.scrollTo(0, logRef.current.scrollHeight), 50);
@@ -64,13 +88,45 @@ export default function Chat() {
     const text = input.trim();
     if (!text || busy) return;
     const history = entries.map((e) => ({ role: e.role, content: e.content }));
-    setEntries((p) => [...p, { role: "user", content: text }]);
+    setEntries((p) => [
+      ...p,
+      { role: "user", content: text },
+      { role: "assistant", content: "", streaming: true, status: "…" },
+    ]);
     setInput(""); setBusy(true); scroll();
+
+    // обновить последнюю (ассистентскую) запись
+    const upd = (fn: (e: Entry) => Entry) =>
+      setEntries((prev) => {
+        const c = [...prev];
+        for (let i = c.length - 1; i >= 0; i--) {
+          if (c[i].role === "assistant") { c[i] = fn(c[i]); break; }
+        }
+        return c;
+      });
+
+    let gotAny = false;
     try {
-      const msg = await api.chat(text, history);
-      setEntries((p) => [...p, { role: "assistant", content: msg.content, msg }]);
+      await chatStream(text, history, {
+        onRouted: (d) => upd((e) => ({ ...e, status: `маршрут → ${d.agent}` })),
+        onToolStart: (d) => { gotAny = true; upd((e) => ({ ...e, status: `⚙ ${d.tool}…` })); },
+        onTool: () => { gotAny = true; },
+        onToken: (t) => { gotAny = true; upd((e) => ({ ...e, status: undefined, content: e.content + t })); scroll(); },
+        onDone: (m) => { gotAny = true; upd((e) => ({ ...e, streaming: false, status: undefined, content: m.content || e.content, msg: m })); },
+      });
+      upd((e) => (e.streaming ? { ...e, streaming: false, status: undefined } : e));
     } catch (err: any) {
-      setEntries((p) => [...p, { role: "assistant", content: "Ошибка: " + err.message }]);
+      if (!gotAny) {
+        // стрим недоступен (старый backend / сеть) — обычный запрос
+        try {
+          const m = await api.chat(text, history);
+          upd((e) => ({ ...e, streaming: false, status: undefined, content: m.content, msg: m }));
+        } catch (e2: any) {
+          upd((e) => ({ ...e, streaming: false, status: undefined, content: "Ошибка: " + e2.message }));
+        }
+      } else {
+        upd((e) => ({ ...e, streaming: false, status: undefined, content: e.content || ("Ошибка: " + err.message) }));
+      }
     } finally { setBusy(false); scroll(); }
   };
 
@@ -91,16 +147,22 @@ export default function Chat() {
         )}
         {entries.map((e, i) => (
           <div key={i} className={"msg " + e.role}>
-            <div>{e.content}</div>
+            {e.content && <div>{e.content}</div>}
+            {e.streaming && e.status && (
+              <div className="muted" style={{ fontSize: 12 }}>{e.status}</div>
+            )}
+            {e.streaming && !e.content && !e.status && (
+              <div className="muted">…</div>
+            )}
             {e.msg && <MsgMeta msg={e.msg} />}
           </div>
         ))}
-        {busy && <div className="msg assistant muted">…думаю</div>}
       </div>
       <div className="chat-input">
         <textarea rows={2} value={input} placeholder="Напишите сообщение…"
                   onChange={(e) => setInput(e.target.value)} onKeyDown={onKey} />
         <button className="primary" onClick={send} disabled={busy}>Отправить</button>
+        <button onClick={clearHistory} disabled={busy} title="Очистить историю чата">Очистить</button>
       </div>
     </div>
   );

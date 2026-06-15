@@ -1,16 +1,18 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
-import type { WeekDay } from "../types";
+import type { Task, WeekDay } from "../types";
 
 const DOW = ["Вс", "Пн", "Вт", "Ср", "Чт", "Пт", "Сб"];
 
 export default function CalendarPage() {
   const [days, setDays] = useState<WeekDay[]>([]);
+  const [tasks, setTasks] = useState<Task[]>([]);
   const [form, setForm] = useState({ title: "", date: "", start: "10:00", end: "11:00" });
 
   const load = async () => {
-    const w = await api.week();
+    const [w, t] = await Promise.all([api.week(), api.tasks()]);
     setDays(w.days);
+    setTasks(t);
     setForm((f) => (f.date ? f : { ...f, date: w.days[0]?.date || "" }));
   };
   useEffect(() => { load(); }, []);
@@ -49,14 +51,26 @@ export default function CalendarPage() {
       <div className="week">
         {days.map((d) => {
           const dow = DOW[new Date(d.date).getDay()];
+          const deadlines = tasks.filter(
+            (t) => t.deadline && t.deadline.slice(0, 10) === d.date
+              && t.status !== "done" && t.status !== "archived"
+          );
+          const empty = d.events.length === 0 && deadlines.length === 0;
           return (
             <div className="day" key={d.date}>
               <h4>{dow} {d.date.slice(5)}</h4>
-              {d.events.length === 0 && <div className="muted" style={{ fontSize: 11 }}>—</div>}
+              {empty && <div className="muted" style={{ fontSize: 11 }}>—</div>}
               {d.events.map((e) => (
                 <div className={"evt " + e.type} key={e.id} title={e.description}>
                   <span className="x" onClick={() => del(e.id)}>✕</span>
                   {e.start_datetime.slice(11, 16)} {e.title}
+                </div>
+              ))}
+              {deadlines.map((t) => (
+                <div className="evt" key={"dl-" + t.id}
+                     title={"Дедлайн задачи: " + t.title}
+                     style={{ background: "#fef3c7", color: "#92400e" }}>
+                  ⏰ {t.deadline!.slice(11, 16)} {t.title}
                 </div>
               ))}
             </div>

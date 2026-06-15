@@ -27,6 +27,8 @@ services:
       - "${LLM_THREADS:-8}"
       - "-ngl"
       - "${LLM_GPU_LAYERS:-0}"
+      # --jinja включает chat-шаблон модели с поддержкой tool-calling (нужно агентам)
+      - "--jinja"
       - "--host"
       - "0.0.0.0"
       - "--port"
